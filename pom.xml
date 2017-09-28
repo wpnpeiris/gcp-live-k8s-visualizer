@@ -19,7 +19,7 @@
 		</repository>
 	</repositories>
 
-<dependencies>
+    <dependencies>
 	    <!-- Log4J/Slf4j -->
 		<dependency>
 			<groupId>org.apache.logging.log4j</groupId>
