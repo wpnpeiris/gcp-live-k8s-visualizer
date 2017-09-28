@@ -34,39 +34,42 @@ var uses = {};
 
 var groups = {};
 
-var insertByName = function(index, value) {
-  if (!value || !value.metadata.labels || !value.metadata.name) {
-    return;
-  }
-  // console.log("type = " + value.type + " labels = " + value.metadata.name);
-  //    var list = groups[value.metadata.name];
-  var key = value.metadata.labels.name;
-    var list = groups[key];
-    if (!list) {
-        list = [];
-        groups[key] = list;
+var insertByServiceSelector = function(index, value) {
+    if(value.spec.selector && value.spec.selector.entry) {
+        var key = value.spec.selector.entry[0].key + "_" + value.spec.selector.entry[0].value;
+        var list = groups[key];
+        if (!list) {
+            list = [];
+            groups[key] = list;
+        }
+        list.push(value);
     }
-    list.push(value);
-};
+}
 
-var groupByName = function() {
-    $.each(pods.items, insertByName);
-    $.each(controllers.items, insertByName);
-    $.each(services.items, insertByName);
-};
+var insertByLabel = function(index, value) {
+    $.each(value.metadata.labels.entry, function(k, v) {
+        var key = v.key + "_" + v.value;
+        if(groups[key]) {
+            groups[key].push(value);
+        }
+    });
+}
 
-var matchesLabelQuery = function(labels, selector) {
-    var match = true;
+var groupByService = function() {
+    $.each(services.items, insertByServiceSelector);
+    $.each(pods.items, insertByLabel);
+    
+}
+
+var matchesByServiceSelector = function(labels, selector) {
+    var match = false;
     if(selector) {
-       $.each(selector, function(key, value) {
-           $.each(selector, function(key, value) {
-               $.each(labels.entry, function(k, v) {
-                   if(v.key == value[0].key && (v.value != value[0].value)) {
-                      match = false;
-                   }  
-               }); 
-           });
-
+        var selectorKey = selector.entry[0].key + "_" + selector.entry[0].value;
+        $.each(labels.entry, function(k, v) {
+            var labelKey = v.key + "_" + v.value;   
+            if(selectorKey == labelKey) {
+                match = true;
+            }
         });
     }
     
@@ -75,34 +78,12 @@ var matchesLabelQuery = function(labels, selector) {
 
 var connectControllers = function() {
     connectUses();
-    for (var i = 0; i < controllers.items.length; i++) {
-        var controller = controllers.items[i];
-    //console.log("controller: " + controller.metadata.name)
-        for (var j = 0; j < pods.items.length; j++) {
-            var pod = pods.items[j];
-            if (pod.metadata.labels.name == controller.metadata.labels.name) {
-        if (controller.metadata.labels.version && pod.metadata.labels.version && (controller.metadata.labels.version != pod.metadata.labels.version)) {
-          continue;
-        }
-        //console.log('connect controller: ' + 'controller-' + controller.metadata.name + ' to pod-' + pod.metadata.name);
-                jsPlumb.connect({
-                    source: 'controller-' + controller.metadata.name,
-                    target: 'pod-' + pod.metadata.name,
-                    anchors:["Bottom", "Bottom"],
-                    paintStyle:{lineWidth:5,strokeStyle:'rgb(51,105,232)'},
-                    joinStyle:"round",
-                    endpointStyle:{ fillStyle: 'rgb(51,105,232)', radius: 7 },
-                    connector: ["Flowchart", { cornerRadius:5 }]});
-            }
-        }
-    }
+    
     for (var i = 0; i < services.items.length; i++) {
         var service = services.items[i];
-    //            if (service.metadata.name == 'kubernetes' || service.metadata.name == 'skydns' || service.metadata.name == 'kubernetes-ro') { continue; }
         for (var j = 0; j < pods.items.length; j++) {
             var pod = pods.items[j];
-      //console.log('connect service: ' + 'service-' + service.metadata.name + ' to pod-' + pod.metadata.name);
-            if (matchesLabelQuery(pod.metadata.labels, service.spec.selector)) {
+            if (matchesByServiceSelector(pod.metadata.labels, service.spec.selector)) {
                 jsPlumb.connect(
                     {
                         source: 'service-' + service.metadata.name,
@@ -200,28 +181,29 @@ var makeGroupOrder = function() {
 var renderNodes = function() {
     var y = 25;
     var x = 100;
-  $.each(nodes.items, function(index, value) {
-    console.log(value);
+    $.each(nodes.items, function(index, value) {
         var div = $('<div/>');
-    var ready = 'not_ready';
-    $.each(value.status.conditions, function(index, condition) {
-      if (condition.type === 'Ready') {
-        ready = (condition.status === 'True' ? 'ready' : 'not_ready' )
-      }
-    });
+        var ready = 'not_ready';
+        $.each(value.status.conditions, function(index, condition) {
+            if (condition.type === 'Ready') {
+                ready = (condition.status === 'True' ? 'ready' : 'not_ready' )
+            }
+        });
 
-        var eltDiv = $('<div class="window node ' + ready + '" title="' + value.metadata.name + '" id="node-' + value.metadata.name +
-                 '" style="left: ' + (x + 250) + '; top: ' + y + '"/>');
-      eltDiv.html('<span><b>Node</b><br/><br/>' + 
-          truncate(value.metadata.name, 6) +
-          '</span>');
-    div.append(eltDiv);
+        var eltDiv = $('<div class="window node ' + ready + 
+                            '"title="' + value.metadata.name + 
+                            '"id="node-' + value.metadata.name + 
+                            '"style="left: ' + (x + 250) + '; top: ' + y + '"/>');
+            eltDiv.html('<span><b>Node</b><br/><br/>' + 
+                        truncate(value.metadata.name, 6) +
+                        '</span>');
+        div.append(eltDiv);
 
-      var elt = $('.nodesbar');
+        var elt = $('.nodesbar');
         elt.append(div);
 
-    x += 120;
- });
+        x += 120;
+    });
 }
 
 var renderGroups = function() {
@@ -229,57 +211,52 @@ var renderGroups = function() {
     var y = 10;
     var serviceLeft = 0;
     var groupOrder = makeGroupOrder();
-  var counts = {} 
+    var counts = {} 
     $.each(groupOrder, function(ix, key) {
         list = groups[key];
-        // list = value;
-    if (!list) {
-        return;
-    }
+        if (!list) {
+            return;
+        }
         var div = $('<div/>');
         var x = 100;
         $.each(list, function(index, value) {
-      //console.log("render groups: " + value.type + ", " + value.metadata.name + ", " + index)
             var eltDiv = null;
-      console.log(value);
-      var phase = value.status.phase ? value.status.phase.toLowerCase() : '';
+            var phase = value.status.phase ? value.status.phase.toLowerCase() : '';
             if (value.type == "pod") {
-        if ('deletionTimestamp' in value.metadata) {
-          phase = 'terminating';
-        }
+                if ('deletionTimestamp' in value.metadata) {
+                  phase = 'terminating';
+                }
                 eltDiv = $('<div class="window pod ' + phase + '" title="' + value.metadata.name + '" id="pod-' + value.metadata.name +
                     '" style="left: ' + (x + 250) + '; top: ' + (y + 160) + '"/>');
                 eltDiv.html('<span>' + 
-          truncate(value.metadata.name, 8, true) +
-          (value.metadata.labels.version ? "<br/>" + value.metadata.labels.version : "") + "<br/><br/>" +
-          "(" + (value.spec.nodeName ? truncate(value.spec.nodeName, 6) : "None")  +")" +
-          '</span>');
+                value.metadata.name + "<br/><br/>" +
+                "(" + (value.spec.nodeName ? truncate(value.spec.nodeName, 20, true) : "None")  +")" + "<br/><br/>" +
+                '</span>');
             } else if (value.type == "service") {
                 eltDiv = $('<div class="window wide service ' + phase + '" title="' + value.metadata.name + '" id="service-' + value.metadata.name +
                     '" style="left: ' + 75 + '; top: ' + y + '"/>');
-                eltDiv.html('<span>' + 
-          value.metadata.name +
-          (value.metadata.labels.version ? "<br/><br/>" + value.metadata.labels.version : "") + 
-          (value.spec.clusterIP ? "<br/><br/>" + value.spec.clusterIP : "") +
-          (value.status.loadBalancer && value.status.loadBalancer.ingress ? "<br/><a style='color:white; text-decoration: underline' href='http://#'></a>" : "") +
-          '</span>');
+                eltDiv.html('<span><a style="color:white; text-decoration: underline" href="http://' + 
+                (value.status.loadBalancer && value.status.loadBalancer.ingress && value.status.loadBalancer.ingress.length > 0  ? value.status.loadBalancer.ingress[0].hostname : "#") + '">' +       
+                value.metadata.name + '</a>' +
+                (value.spec.type ? '<br/><br/>' + value.spec.type : "") +
+                (value.spec.clusterIP ? '<br/><br/>(' + value.spec.clusterIP + ')': "") +
+                '</span>');
             } else {
-        var key = 'controller-' + value.metadata.labels.name;
-        counts[key] = key in counts ? counts[key] + 1 : 0;
-                //eltDiv = $('<div class="window wide controller" title="' + value.metadata.name + '" id="controller-' + value.metadata.name +
-                //  '" style="left: ' + (900 + counts[key] * 100) + '; top: ' + (y + 100 + counts[key] * 100) + '"/>');
-        var minLeft = 900;
-        var calcLeft = 400 + (value.status.replicas * 130);
-        var left = minLeft > calcLeft ? minLeft : calcLeft;
+                var key = 'controller-' + value.metadata.labels.name;
+                counts[key] = key in counts ? counts[key] + 1 : 0;
+                
+                var minLeft = 900;
+                var calcLeft = 400 + (value.status.replicas * 130);
+                var left = minLeft > calcLeft ? minLeft : calcLeft;
                 eltDiv = $('<div class="window wide controller" title="' + value.metadata.name + '" id="controller-' + value.metadata.name +
                     '" style="left: ' + (left + counts[key] * 100) + '; top: ' + (y + 100 + counts[key] * 100) + '"/>');
                 eltDiv.html('<span>' + 
-          value.metadata.name +
-          (value.metadata.labels.version ? "<br/><br/>" + value.metadata.labels.version : "") + 
-          '</span>');
+                value.metadata.name +
+                (value.metadata.labels.version ? "<br/><br/>" + value.metadata.labels.version : "") + 
+                '</span>');
             }
             div.append(eltDiv);
-            x += 130;
+            x += 210;
         });
         y += 400;
         serviceLeft += 200;
@@ -298,54 +275,46 @@ var insertUse = function(name, use) {
 
 var loadData = function() {
     var deferred = new $.Deferred();
-    var req1 = $.getJSON("/api/v1/pods?labelSelector=visualize%3Dtrue", function( data ) {
+    var podList = $.getJSON("/api/v1/pods", function( data ) {
         pods = data;
         $.each(data.items, function(key, val) {
-        val.type = 'pod';
-      if (val.metadata.labels && val.metadata.labels.uses) {
-        var key = val.metadata.labels.name;
-            if (!uses[key]) {
-                uses[key] = val.metadata.labels.uses.split("_");
-            } else {
-                $.each(val.metadata.labels.uses.split("_"), function(ix, use) { insertUse(key, use); });
-            }
-          }
-    });
+            val.type = 'pod';
+            if (val.metadata.labels && val.metadata.labels.uses) {
+                var key = val.metadata.labels.name;
+                if (!uses[key]) {
+                     uses[key] = val.metadata.labels.uses.split("_");
+                } else {
+                    $.each(val.metadata.labels.uses.split("_"), function(ix, use) { insertUse(key, use); });
+                }
+             }
+         });
     });
 
-    var req2 = $.getJSON("/api/v1/replicationcontrollers?labelSelector=visualize%3Dtrue", function( data ) {
+    var rcList = $.getJSON("/api/v1/replicationcontrollers", function( data ) {
         controllers = data;
         $.each(data.items, function(key, val) {
-      val.type = 'replicationController';
-      //console.log("Controller ID = " + val.metadata.name)
-    });
+            val.type = 'replicationController';
+        });
     });
 
 
-    var req3 = $.getJSON("/api/v1/services?labelSelector=visualize%3Dtrue", function( data ) {
+    var servicesList = $.getJSON("/api/v1/services", function( data ) {
         services = data;
-        //console.log("loadData(): Services");
-        //console.log(services);
         $.each(data.items, function(key, val) {
-      val.type = 'service';
-      //console.log("service ID = " + val.metadata.name)
-    });
+           val.type = 'service';      
+        });
     });
 
-    var req4 = $.getJSON("/api/v1/nodes", function( data ) {
+    var nodeList = $.getJSON("/api/v1/nodes", function( data ) {
         nodes = data;
-        //console.log("loadData(): Services");
-        //console.log(nodes);
         $.each(data.items, function(key, val) {
-      val.type = 'node';
-      //console.log("service ID = " + val.metadata.name)
-    });
+            val.type = 'node';
+        });
     });
 
-    $.when(req1, req2, req3, req4).then(function() {
+    $.when(podList, rcList, servicesList, nodeList).then(function() {
         deferred.resolve();
     });
-
 
     return deferred;
 }
@@ -354,41 +323,32 @@ function refresh(instance) {
     pods = [];
     services = [];
     controllers = [];
-  nodes = [];
+    nodes = [];
     uses = {};
     groups = {};
 
 
     $.when(loadData()).then(function() {
-        groupByName();
+        groupByService();
         $('#sheet').empty();
-    renderNodes();
+        renderNodes();
         renderGroups();
         connectControllers();
-
         setTimeout(function() {
             refresh(instance);
         }, 2000);
-  });
+    });
 }
 
 jsPlumb.bind("ready", function() {
     var instance = jsPlumb.getInstance({
-        // default drag options
         DragOptions : { cursor: 'pointer', zIndex:2000 },
-        // the overlays to decorate each connection with.  note that the label overlay uses a function to generate the label text; in this
-        // case it returns the 'labelText' member that we set on each connection in the 'init' method below.
         ConnectionOverlays : [
             [ "Arrow", { location:1 } ],
-            //[ "Label", {
-            //  location:0.1,
-            //  id:"label",
-            //  cssClass:"aLabel"
-            //}]
         ],
         Container:"flowchart-demo"
     });
 
     refresh(instance);
     jsPlumb.fire("jsPlumbDemoLoaded", instance);
-  });
+});
