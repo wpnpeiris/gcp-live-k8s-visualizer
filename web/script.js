@@ -14,6 +14,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+var PENDING_POD_NODE_NAME = "pending";
+var NODE_WIDTH_PER_POD = 200;
+var GROUP_HEIGHT = 400;
+var NODE_LEFT_MARGIN = 250;
+var NODE_PADDING = 20;
+var POD_LEFT_PADDING = 10;
+var POD_TOP_PADDING = 160;
+var SERVICE_LEFT_PADDING = 40;
+
 var truncate = function(str, width, left) {
   if (!str) return "";
 
@@ -29,12 +38,11 @@ var truncate = function(str, width, left) {
 
 var pods = [];
 var services = [];
-var controllers = [];
 var uses = {};
-
 var groups = {};
+var maxPodsPerNode = {};
 
-var insertByServiceSelector = function(index, value) {
+var groupServiceBySelector = function(index, value) {
     if(value.spec.selector && value.spec.selector.entry) {
         var key = value.spec.selector.entry[0].key + "_" + value.spec.selector.entry[0].value;
         var list = groups[key];
@@ -46,7 +54,7 @@ var insertByServiceSelector = function(index, value) {
     }
 }
 
-var insertByLabel = function(index, value) {
+var groupPodsByLabel = function(index, value) {
     $.each(value.metadata.labels.entry, function(k, v) {
         var key = v.key + "_" + v.value;
         if(groups[key]) {
@@ -55,10 +63,43 @@ var insertByLabel = function(index, value) {
     });
 }
 
-var groupByService = function() {
-    $.each(services.items, insertByServiceSelector);
-    $.each(pods.items, insertByLabel);
+var updateServiceGroups = function() {
+    $.each(services.items, groupServiceBySelector);
+    $.each(pods.items, groupPodsByLabel);
+}
+
+var groupNodeWithPodInfo = function(index, value) {
+    var podsPerNode = {};
+    $.each(value, function(k, v) {
+        if(v.type == "pod") {
+            var key = v.spec.nodeName ? v.spec.nodeName : PENDING_POD_NODE_NAME;
+            
+            var nodeInfo = podsPerNode[key];
+            if(nodeInfo) {
+                nodeInfo.count ++;
+            } else {
+                 nodeInfo = {};
+                 nodeInfo.count = 1;
+                 nodeInfo.left = 0;
+            }
+            podsPerNode[key] = nodeInfo;
+        }
+    });
     
+    $.each(podsPerNode, function(n, c) {
+        var nodeInfo = maxPodsPerNode[n];
+        if(nodeInfo) {
+            if(c.count > nodeInfo.count) {
+                maxPodsPerNode[n] = c;
+            }
+        } else {
+            maxPodsPerNode[n] = c;
+        }
+    });
+}
+
+var updateNodeGroups = function() {
+    $.each(groups, groupNodeWithPodInfo);
 }
 
 var matchesByServiceSelector = function(labels, selector) {
@@ -118,19 +159,15 @@ var connectUses = function() {
         if (colorIx >= colors.length) { colorIx = 0;};
         $.each(pods.items, function(i, pod) {
         var podKey = pod.metadata.labels.name;
-         //console.log('connect uses key: ' +key + ', ' + podKey);
             if (podKey == key) {
                 $.each(list, function(j, serviceId) {
-          //console.log('connect: ' + 'pod-' + pod.metadata.name + ' to service-' + serviceId);
                     jsPlumb.connect(
                     {
                         source: 'pod-' + pod.metadata.name,
                         target: 'service-' + serviceId,
                         endpoint: "Blank",
-                        //anchors:["Bottom", "Top"],
-            anchors:[[ 0.5, 1, 0, 1, -30, 0 ], "Top"],
-                        //connector: "Straight",
-            connector: ["Bezier", { curviness:75 }],
+                        anchors:[[ 0.5, 1, 0, 1, -30, 0 ], "Top"],
+                        connector: ["Bezier", { curviness:75 }],
                         paintStyle:{lineWidth:2,strokeStyle:color},
                         overlays:[
                             [ "Arrow", { width:15, length:30, location: 0.3}],
@@ -145,15 +182,15 @@ var connectUses = function() {
 };
 
 var makeGroupOrder = function() {
-  var groupScores = {};
-  $.each(groups, function(key, val) {
-    //console.log("group key: " + key);
+    var groupScores = {};
+    $.each(groups, function(key, val) {
         if (!groupScores[key]) {
           groupScores[key] = 0;
         }
+        
         if (uses[key]) {
             value = uses[key];
-          $.each(value, function(ix, uses_label) {
+            $.each(value, function(ix, uses_label) {
                 if (!groupScores[uses_label]) {
                     groupScores[uses_label] = 1;
                 } else {
@@ -168,57 +205,99 @@ var makeGroupOrder = function() {
             }
         }
     });
-  var groupOrder = [];
-  $.each(groupScores, function(key, value) {
-    groupOrder.push(key);
+    var groupOrder = [];
+    $.each(groupScores, function(key, value) {
+        groupOrder.push(key);
     });
-  groupOrder.sort(function(a, b) { return groupScores[a] - groupScores[b]; });
+    groupOrder.sort(function(a, b) { return groupScores[a] - groupScores[b]; });
 
-    //console.log(groupOrder);
-  return groupOrder;
+    return groupOrder;
 };
 
-var renderNodes = function() {
+var renderNodsWithNoPods = function() {
+    var elt = $('.nodes');
     var y = 25;
-    var x = 100;
+    var x = 0;
     $.each(nodes.items, function(index, value) {
-        var div = $('<div/>');
-        var ready = 'not_ready';
-        $.each(value.status.conditions, function(index, condition) {
-            if (condition.type === 'Ready') {
-                ready = (condition.status === 'True' ? 'ready' : 'not_ready' )
-            }
-        });
+        if(!maxPodsPerNode[value.metadata.name]) {
+            var div = $('<div/>');
+            var ready = 'not_ready';
+            $.each(value.status.conditions, function(index, condition) {
+                if (condition.type === 'Ready') {
+                    ready = (condition.status === 'True' ? 'ready' : 'not_ready' )
+                }
+            });
+    
+            var eltDiv = $('<div class="window node ' + ready + 
+                                '"title="' + value.metadata.name + 
+                                '"id="node-' + value.metadata.name + 
+                                '"style="left: ' + (x + NODE_LEFT_MARGIN) + '; top: ' + y + '; width: ' + NODE_WIDTH_PER_POD + '"/>');
+                eltDiv.html('<span><b>Node</b><br/><br/>' + 
+                            value.metadata.name +
+                            '</span>');
+            div.append(eltDiv);          
+            elt.append(div);
+    
+            x += NODE_WIDTH_PER_POD + NODE_PADDING;
+        }
+        
+    });
+}
 
-        var eltDiv = $('<div class="window node ' + ready + 
+var renderNodsWithPods = function() {
+    var elt = $('#sheet');
+    var y = 10;
+    var x = 0;
+    
+    if(maxPodsPerNode[PENDING_POD_NODE_NAME]) {
+        maxPodsPerNode[PENDING_POD_NODE_NAME].left = NODE_LEFT_MARGIN;
+        x += NODE_WIDTH_PER_POD * maxPodsPerNode[PENDING_POD_NODE_NAME].count + NODE_PADDING;
+    
+    } 
+        
+    $.each(nodes.items, function(index, value) {
+        if(maxPodsPerNode[value.metadata.name]) {
+            var div = $('<div/>');
+            var ready = 'not_ready';
+            $.each(value.status.conditions, function(index, condition) {
+                if (condition.type === 'Ready') {
+                    ready = (condition.status === 'True' ? 'ready' : 'not_ready' )
+                }
+            });
+        
+            var width = NODE_WIDTH_PER_POD * (maxPodsPerNode[value.metadata.name] ? maxPodsPerNode[value.metadata.name].count : 1);
+            var height = GROUP_HEIGHT * (Object.keys(groups).length) 
+            var eltDiv = $('<div class="window node ' + ready + 
                             '"title="' + value.metadata.name + 
                             '"id="node-' + value.metadata.name + 
-                            '"style="left: ' + (x + 250) + '; top: ' + y + '"/>');
-            eltDiv.html('<span><b>Node</b><br/><br/>' + 
-                        truncate(value.metadata.name, 6) +
-                        '</span>');
-        div.append(eltDiv);
-
-        var elt = $('.nodesbar');
-        elt.append(div);
-
-        x += 120;
+                            '"style="left: ' + (x + NODE_LEFT_MARGIN) + '; top: ' + y + '; width: ' + width + '; height:' + height + '; z-index: 0"/>');
+            eltDiv.html('<span><b>Node: </b>' + value.metadata.name + '</span>');
+            div.append(eltDiv);
+        
+            
+            elt.append(div);
+        
+        
+            maxPodsPerNode[value.metadata.name].left = x ;
+            
+            x += width + NODE_PADDING;
+        }
     });
 }
 
 var renderGroups = function() {
     var elt = $('#sheet');
     var y = 10;
-    var serviceLeft = 0;
     var groupOrder = makeGroupOrder();
     var counts = {} 
+   
     $.each(groupOrder, function(ix, key) {
         list = groups[key];
         if (!list) {
             return;
         }
         var div = $('<div/>');
-        var x = 100;
+        var copyMaxPodsPerNodes = $.extend(true, {}, maxPodsPerNode);
         $.each(list, function(index, value) {
             var eltDiv = null;
             var phase = value.status.phase ? value.status.phase.toLowerCase() : '';
@@ -226,40 +305,38 @@ var renderGroups = function() {
                 if ('deletionTimestamp' in value.metadata) {
                   phase = 'terminating';
                 }
+                
+                var podLeft;
+                if(value.spec.nodeName) {
+                    podLeft = copyMaxPodsPerNodes[value.spec.nodeName].left + NODE_LEFT_MARGIN + POD_LEFT_PADDING;
+                    copyMaxPodsPerNodes[value.spec.nodeName].left += NODE_WIDTH_PER_POD;
+                } else {
+                    podLeft = copyMaxPodsPerNodes[PENDING_POD_NODE_NAME].left + POD_LEFT_PADDING;
+                    copyMaxPodsPerNodes[PENDING_POD_NODE_NAME].left += NODE_WIDTH_PER_POD;
+                }
+                
                 eltDiv = $('<div class="window pod ' + phase + '" title="' + value.metadata.name + '" id="pod-' + value.metadata.name +
-                    '" style="left: ' + (x + 250) + '; top: ' + (y + 160) + '"/>');
+                        '" style="left: ' + (podLeft) + '; top: ' + (y + POD_TOP_PADDING) + '"/>');
                 eltDiv.html('<span>' + 
                 value.metadata.name + "<br/><br/>" +
                 "(" + (value.spec.nodeName ? truncate(value.spec.nodeName, 20, true) : "None")  +")" + "<br/><br/>" +
                 '</span>');
+                
+                
             } else if (value.type == "service") {
                 eltDiv = $('<div class="window wide service ' + phase + '" title="' + value.metadata.name + '" id="service-' + value.metadata.name +
-                    '" style="left: ' + 75 + '; top: ' + y + '"/>');
+                    '" style="left: ' + SERVICE_LEFT_PADDING + '; top: ' + y + '"/>');
                 eltDiv.html('<span><a style="color:white; text-decoration: underline" href="http://' + 
                 (value.status.loadBalancer && value.status.loadBalancer.ingress && value.status.loadBalancer.ingress.length > 0  ? value.status.loadBalancer.ingress[0].hostname : "#") + '">' +       
                 value.metadata.name + '</a>' +
                 (value.spec.type ? '<br/><br/>' + value.spec.type : "") +
                 (value.spec.clusterIP ? '<br/><br/>(' + value.spec.clusterIP + ')': "") +
                 '</span>');
-            } else {
-                var key = 'controller-' + value.metadata.labels.name;
-                counts[key] = key in counts ? counts[key] + 1 : 0;
-                
-                var minLeft = 900;
-                var calcLeft = 400 + (value.status.replicas * 130);
-                var left = minLeft > calcLeft ? minLeft : calcLeft;
-                eltDiv = $('<div class="window wide controller" title="' + value.metadata.name + '" id="controller-' + value.metadata.name +
-                    '" style="left: ' + (left + counts[key] * 100) + '; top: ' + (y + 100 + counts[key] * 100) + '"/>');
-                eltDiv.html('<span>' + 
-                value.metadata.name +
-                (value.metadata.labels.version ? "<br/><br/>" + value.metadata.labels.version : "") + 
-                '</span>');
-            }
+            } 
+            
             div.append(eltDiv);
-            x += 210;
         });
-        y += 400;
-        serviceLeft += 200;
+        y += GROUP_HEIGHT;
         elt.append(div);
     });
 };
@@ -273,9 +350,21 @@ var insertUse = function(name, use) {
   uses[name].push(use);
 };
 
+
+var renderNamespaces = function() {
+    $(".namespaces select").empty();  
+    $.getJSON("/api/v1/namespaces", function( data ) {
+        $.each(data.items, function(key, val) {
+            $(".namespaces select").append("<option value='" + val.metadata.name + "'>" + val.metadata.name + "</option>");
+        });
+    });
+}
+
+
 var loadData = function() {
     var deferred = new $.Deferred();
-    var podList = $.getJSON("/api/v1/pods", function( data ) {
+    var namespace = $("#namespace").val();
+    var podList = $.getJSON("/api/v1/pods?namespace=" + namespace, function( data ) {
         pods = data;
         $.each(data.items, function(key, val) {
             val.type = 'pod';
@@ -290,15 +379,7 @@ var loadData = function() {
          });
     });
 
-    var rcList = $.getJSON("/api/v1/replicationcontrollers", function( data ) {
-        controllers = data;
-        $.each(data.items, function(key, val) {
-            val.type = 'replicationController';
-        });
-    });
-
-
-    var servicesList = $.getJSON("/api/v1/services", function( data ) {
+    var servicesList = $.getJSON("/api/v1/services?namespace=" + namespace, function( data ) {
         services = data;
         $.each(data.items, function(key, val) {
            val.type = 'service';      
@@ -311,8 +392,9 @@ var loadData = function() {
             val.type = 'node';
         });
     });
-
-    $.when(podList, rcList, servicesList, nodeList).then(function() {
+    
+    
+    $.when(podList, servicesList, nodeList).then(function() {
         deferred.resolve();
     });
 
@@ -322,21 +404,25 @@ var loadData = function() {
 function refresh(instance) {
     pods = [];
     services = [];
-    controllers = [];
     nodes = [];
     uses = {};
     groups = {};
-
+    groupsByNode = {};
+    maxPodsPerNode = {};
 
     $.when(loadData()).then(function() {
-        groupByService();
+        updateServiceGroups();
+        updateNodeGroups();
         $('#sheet').empty();
-        renderNodes();
+        $('.nodes').empty();
+        
+        renderNodsWithNoPods();
+        renderNodsWithPods();
         renderGroups();
         connectControllers();
         setTimeout(function() {
             refresh(instance);
-        }, 2000);
+        }, 10000);
     });
 }
 

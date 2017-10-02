@@ -10,6 +10,8 @@ import javax.ws.rs.core.MediaType;
 
 import com.wpnpeiris.k8s.visualizer.proxy.K8sProxy;
 
+import io.fabric8.kubernetes.api.model.HorizontalPodAutoscalerList;
+import io.fabric8.kubernetes.api.model.NamespaceList;
 import io.fabric8.kubernetes.api.model.NodeList;
 import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.api.model.ReplicationControllerList;
@@ -28,6 +30,13 @@ public class VisualizerResource {
     @Produces(MediaType.APPLICATION_JSON)
     public ReplicationControllerList getReplicationControllers() {
         return K8sProxy.getInstance().getReplicationControllerList();
+    }
+
+    @GET
+    @Path("autoscalers")
+    @Produces(MediaType.APPLICATION_JSON)
+    public HorizontalPodAutoscalerList getAutoScalers() {
+        return K8sProxy.getInstance().getAutoscalerList();
     }
 
     @GET
@@ -50,4 +59,12 @@ public class VisualizerResource {
     public NodeList getNodes() {
         return K8sProxy.getInstance().getNodeList();
     }
+
+    @GET
+    @Path("namespaces")
+    @Produces(MediaType.APPLICATION_JSON)
+    public NamespaceList getNamespaces() {
+        return K8sProxy.getInstance().getNamespacesList();
+    }
+
 }

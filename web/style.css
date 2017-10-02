@@ -39,8 +39,7 @@
 }
 
 .navbar-logo {
-  margin-left: 10px;
-  margin-top: 5px;
+  margin: 20px;
   text-align: left;
 }
 
@@ -62,10 +61,26 @@
     position: absolute;
     left: 0;
     right: 0;
-    top: 50px;
+    top: 70px;
     height: 200px;
     background-color: light-grey;
     border-bottom: thick solid black;
+}
+
+.filters {
+  position: absolute;
+  top: 25px;
+  left: 20px;
+  width: 220px;
+}
+
+.filters input {
+  height: 30px;
+  line-height: 30px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  width: 100%;
+  padding: 5px;
 }
 
 .not_ready {
@@ -74,4 +89,9 @@
 
 .terminating {
   background-color: red;
+}
+
+.node span {
+  vertical-align: top;
+  text-align: left;
 }

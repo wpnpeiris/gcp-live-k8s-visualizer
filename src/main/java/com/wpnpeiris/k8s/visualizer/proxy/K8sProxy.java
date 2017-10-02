@@ -3,12 +3,12 @@
  */
 package com.wpnpeiris.k8s.visualizer.proxy;
 
-import static com.wpnpeiris.k8s.visualizer.K8sVisualizerProperties.K8S_LABEL;
 import static com.wpnpeiris.k8s.visualizer.K8sVisualizerProperties.K8S_MASTER_URL;
-import static com.wpnpeiris.k8s.visualizer.K8sVisualizerProperties.K8S_NAMESPACE;
 
 import com.wpnpeiris.k8s.visualizer.K8sVisualizerProperties;
 
+import io.fabric8.kubernetes.api.model.HorizontalPodAutoscalerList;
+import io.fabric8.kubernetes.api.model.NamespaceList;
 import io.fabric8.kubernetes.api.model.NodeList;
 import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.api.model.ReplicationControllerList;
@@ -44,28 +44,26 @@ public class K8sProxy {
     }
 
     public ReplicationControllerList getReplicationControllerList() {
-        return client.replicationControllers()
-                .inNamespace(K8sVisualizerProperties.getProperty(K8S_NAMESPACE))
-                .withLabel(K8sVisualizerProperties.getProperty(K8S_LABEL))
-                .list();
+        return client.replicationControllers().list();
     }
 
     public ServiceList getServiceList() {
-        return client.services()
-                .inNamespace(K8sVisualizerProperties.getProperty(K8S_NAMESPACE))
-                .withLabel(K8sVisualizerProperties.getProperty(K8S_LABEL))
-                .list();
+        return client.services().list();
     }
 
     public PodList getPodList() {
-        return client.pods()
-                .inNamespace(K8sVisualizerProperties.getProperty(K8S_NAMESPACE))
-                .withLabel(K8sVisualizerProperties.getProperty(K8S_LABEL))
-                .list();
+        return client.pods().list();
     }
 
     public NodeList getNodeList() {
-        return client.nodes()
-                .list();
+        return client.nodes().list();
+    }
+
+    public NamespaceList getNamespacesList() {
+        return client.namespaces().list();
+    }
+
+    public HorizontalPodAutoscalerList getAutoscalerList() {
+        return client.autoscaling().horizontalPodAutoscalers().list();
     }
 }
